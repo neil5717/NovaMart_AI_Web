@@ -43,11 +43,13 @@ const openai = project.getOpenAIClient({
 
 /*
 ============================================================
-SAFE AZURE IDENTITY DIAGNOSTIC
+LOCAL AZURE IDENTITY DIAGNOSTIC
 ============================================================
 
-This confirms which Entra application Render is actually
-using WITHOUT logging the access token or client secret.
+This confirms which Entra identity Azure CLI / local
+DefaultAzureCredential is actually using.
+
+No access token is logged.
 */
 
 async function logAzureIdentity() {
@@ -80,13 +82,26 @@ async function logAzureIdentity() {
       "========== AZURE IDENTITY DIAGNOSTIC =========="
     );
 
-    console.log("Token audience:", payload.aud);
+    console.log(
+      "Token audience:",
+      payload.aud
+    );
+
     console.log(
       "Application ID:",
       payload.appid || payload.azp
     );
-    console.log("Object ID:", payload.oid);
-    console.log("Tenant ID:", payload.tid);
+
+    console.log(
+      "Object ID:",
+      payload.oid
+    );
+
+    console.log(
+      "Tenant ID:",
+      payload.tid
+    );
+
     console.log(
       "Token expires:",
       new Date(payload.exp * 1000).toISOString()
