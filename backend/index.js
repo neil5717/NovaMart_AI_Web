@@ -23,7 +23,23 @@ const project = new AIProjectClient(
   credential
 );
 
-const openai = project.getOpenAIClient();
+/*
+============================================================
+CONNECT DIRECTLY TO NOVAMART AI AGENT
+============================================================
+
+The OpenAI client is bound directly to the Foundry Agent.
+
+This uses the current agent endpoint instead of the older
+agent_reference request pattern.
+*/
+
+const openai = project.getOpenAIClient({
+  azureConfig: {
+    allowPreview: true,
+    agentName: process.env.FOUNDRY_AGENT_NAME,
+  },
+});
 
 /*
 ============================================================
@@ -41,7 +57,9 @@ async function logAzureIdentity() {
     );
 
     if (!token || !token.token) {
-      console.log("Azure identity diagnostic: No token received.");
+      console.log(
+        "Azure identity diagnostic: No token received."
+      );
       return;
     }
 
@@ -58,13 +76,25 @@ async function logAzureIdentity() {
       Buffer.from(parts[1], "base64url").toString("utf8")
     );
 
-    console.log("========== AZURE IDENTITY DIAGNOSTIC ==========");
+    console.log(
+      "========== AZURE IDENTITY DIAGNOSTIC =========="
+    );
+
     console.log("Token audience:", payload.aud);
-    console.log("Application ID:", payload.appid || payload.azp);
+    console.log(
+      "Application ID:",
+      payload.appid || payload.azp
+    );
     console.log("Object ID:", payload.oid);
     console.log("Tenant ID:", payload.tid);
-    console.log("Token expires:", new Date(payload.exp * 1000).toISOString());
-    console.log("===============================================");
+    console.log(
+      "Token expires:",
+      new Date(payload.exp * 1000).toISOString()
+    );
+
+    console.log(
+      "==============================================="
+    );
   } catch (error) {
     console.error(
       "Azure identity diagnostic failed:",
@@ -93,7 +123,9 @@ function extractChartData(text) {
   let chartData = [];
 
   /*
+  ----------------------------------------------------------
   Extract chart type
+  ----------------------------------------------------------
   */
 
   const chartTypeMatch = text.match(
@@ -105,7 +137,9 @@ function extractChartData(text) {
   }
 
   /*
+  ----------------------------------------------------------
   Extract chart title
+  ----------------------------------------------------------
   */
 
   const chartTitleMatch = text.match(
@@ -117,7 +151,9 @@ function extractChartData(text) {
   }
 
   /*
+  ----------------------------------------------------------
   Extract structured chart data
+  ----------------------------------------------------------
   */
 
   const chartDataMatch = text.match(
@@ -207,11 +243,14 @@ app.post("/api/chat", async (req, res) => {
     };
 
     /*
+    --------------------------------------------------------
     Continue previous conversation
+    --------------------------------------------------------
     */
 
     if (previousResponseId) {
-      requestBody.previous_response_id = previousResponseId;
+      requestBody.previous_response_id =
+        previousResponseId;
     }
 
     /*
@@ -221,15 +260,7 @@ app.post("/api/chat", async (req, res) => {
     */
 
     const response = await openai.responses.create(
-      requestBody,
-      {
-        body: {
-          agent_reference: {
-            name: process.env.FOUNDRY_AGENT_NAME,
-            type: "agent_reference",
-          },
-        },
-      }
+      requestBody
     );
 
     /*
@@ -248,7 +279,9 @@ app.post("/api/chat", async (req, res) => {
 
     const rawAnswer = response.output_text;
 
-    console.log(`Response ID: ${response.id}`);
+    console.log(
+      `Response ID: ${response.id}`
+    );
 
     console.log(
       `Agent raw response:\n${rawAnswer}`
@@ -266,9 +299,20 @@ app.post("/api/chat", async (req, res) => {
       chartData,
     } = extractChartData(rawAnswer);
 
-    console.log("Chart type:", chartType);
-    console.log("Chart title:", chartTitle);
-    console.log("Extracted chart data:", chartData);
+    console.log(
+      "Chart type:",
+      chartType
+    );
+
+    console.log(
+      "Chart title:",
+      chartTitle
+    );
+
+    console.log(
+      "Extracted chart data:",
+      chartData
+    );
 
     /*
     --------------------------------------------------------
@@ -294,8 +338,12 @@ app.post("/api/chat", async (req, res) => {
       chartTitle,
       chartData,
     });
+
   } catch (error) {
-    console.error("Foundry error:", error);
+    console.error(
+      "Foundry error:",
+      error
+    );
 
     res.status(500).json({
       error:
@@ -312,7 +360,8 @@ HEALTH CHECK
 
 app.get("/", (req, res) => {
   res.json({
-    message: "NovaMart AI Backend is running",
+    message:
+      "NovaMart AI Backend is running",
   });
 });
 
