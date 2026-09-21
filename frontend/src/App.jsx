@@ -113,7 +113,7 @@ function App() {
 
     try {
       const response = await fetch(
-        "http://localhost:3001/api/chat",
+        "https://novamart-ai-web.onrender.com/api/chat",
         {
           method: "POST",
           headers: {
