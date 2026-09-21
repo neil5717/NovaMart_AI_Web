@@ -11,53 +11,80 @@ app.use(cors());
 app.use(express.json());
 
 /*
-  ============================================================
-  MICROSOFT FOUNDRY CONNECTION
-  ============================================================
+============================================================
+MICROSOFT FOUNDRY CONNECTION
+============================================================
 */
+
+const credential = new DefaultAzureCredential();
 
 const project = new AIProjectClient(
   process.env.FOUNDRY_PROJECT_ENDPOINT,
-  new DefaultAzureCredential()
+  credential
 );
 
 const openai = project.getOpenAIClient();
 
 /*
-  ============================================================
-  CONVERSATION MEMORY
-  ============================================================
+============================================================
+SAFE AZURE IDENTITY DIAGNOSTIC
+============================================================
+
+This confirms which Entra application Render is actually
+using WITHOUT logging the access token or client secret.
+*/
+
+async function logAzureIdentity() {
+  try {
+    const token = await credential.getToken(
+      "https://ai.azure.com/.default"
+    );
+
+    if (!token || !token.token) {
+      console.log("Azure identity diagnostic: No token received.");
+      return;
+    }
+
+    const parts = token.token.split(".");
+
+    if (parts.length !== 3) {
+      console.log(
+        "Azure identity diagnostic: Token format could not be decoded."
+      );
+      return;
+    }
+
+    const payload = JSON.parse(
+      Buffer.from(parts[1], "base64url").toString("utf8")
+    );
+
+    console.log("========== AZURE IDENTITY DIAGNOSTIC ==========");
+    console.log("Token audience:", payload.aud);
+    console.log("Application ID:", payload.appid || payload.azp);
+    console.log("Object ID:", payload.oid);
+    console.log("Tenant ID:", payload.tid);
+    console.log("Token expires:", new Date(payload.exp * 1000).toISOString());
+    console.log("===============================================");
+  } catch (error) {
+    console.error(
+      "Azure identity diagnostic failed:",
+      error.message
+    );
+  }
+}
+
+/*
+============================================================
+CONVERSATION MEMORY
+============================================================
 */
 
 let previousResponseId = null;
 
 /*
-  ============================================================
-  EXTRACT CHART INFORMATION
-  ============================================================
-
-  The Agent should provide chart metadata only when a chart
-  has been requested.
-
-  Expected format:
-
-  Chart type: bar
-  Chart title: Total Sales by Territory
-  Chart data: [
-    { category: 'Southwest', value: 24184610 },
-    { category: 'Canada', value: 16355771 }
-  ]
-
-  IMPORTANT:
-  We do NOT create charts from ordinary Markdown tables.
-
-  This prevents tables such as:
-
-  | Metric | Value |
-  | Gross Profit | 12,551,286 |
-  | Gross Margin % | 11.43% |
-
-  from incorrectly becoming charts.
+============================================================
+EXTRACT CHART INFORMATION
+============================================================
 */
 
 function extractChartData(text) {
@@ -66,9 +93,7 @@ function extractChartData(text) {
   let chartData = [];
 
   /*
-    ----------------------------------------------------------
-    Extract chart type
-    ----------------------------------------------------------
+  Extract chart type
   */
 
   const chartTypeMatch = text.match(
@@ -80,9 +105,7 @@ function extractChartData(text) {
   }
 
   /*
-    ----------------------------------------------------------
-    Extract chart title
-    ----------------------------------------------------------
+  Extract chart title
   */
 
   const chartTitleMatch = text.match(
@@ -94,9 +117,7 @@ function extractChartData(text) {
   }
 
   /*
-    ----------------------------------------------------------
-    Extract structured chart data
-    ----------------------------------------------------------
+  Extract structured chart data
   */
 
   const chartDataMatch = text.match(
@@ -118,12 +139,6 @@ function extractChartData(text) {
     }));
   }
 
-  /*
-    ----------------------------------------------------------
-    Return extracted chart information
-    ----------------------------------------------------------
-  */
-
   return {
     chartType,
     chartTitle,
@@ -132,53 +147,28 @@ function extractChartData(text) {
 }
 
 /*
-  ============================================================
-  REMOVE CHART METADATA FROM USER-FACING ANSWER
-  ============================================================
-
-  The chart metadata is useful to our backend but should not
-  be displayed in the chat.
-
-  Removes:
-
-  Chart type: bar
-  Chart title: Total Sales by Territory
-  Chart data: [...]
+============================================================
+REMOVE CHART METADATA FROM USER-FACING ANSWER
+============================================================
 */
 
 function cleanAnswer(text) {
   let cleaned = text;
-
-  /*
-    Remove Chart type line
-  */
 
   cleaned = cleaned.replace(
     /^\s*Chart type:\s*(bar|line|pie|scatter)\s*$/gim,
     ""
   );
 
-  /*
-    Remove Chart title line
-  */
-
   cleaned = cleaned.replace(
     /^\s*Chart title:\s*.+$/gim,
     ""
   );
 
-  /*
-    Remove Chart data block
-  */
-
   cleaned = cleaned.replace(
     /Chart data:\s*\[[\s\S]*?\]/gi,
     ""
   );
-
-  /*
-    Remove excessive blank lines
-  */
 
   cleaned = cleaned.replace(
     /\n{3,}/g,
@@ -189,9 +179,9 @@ function cleanAnswer(text) {
 }
 
 /*
-  ============================================================
-  CHAT API
-  ============================================================
+============================================================
+CHAT API
+============================================================
 */
 
 app.post("/api/chat", async (req, res) => {
@@ -207,9 +197,9 @@ app.post("/api/chat", async (req, res) => {
     console.log(`User question: ${message}`);
 
     /*
-      --------------------------------------------------------
-      Build Foundry request
-      --------------------------------------------------------
+    --------------------------------------------------------
+    Build Foundry request
+    --------------------------------------------------------
     */
 
     const requestBody = {
@@ -217,7 +207,7 @@ app.post("/api/chat", async (req, res) => {
     };
 
     /*
-      Continue previous conversation
+    Continue previous conversation
     */
 
     if (previousResponseId) {
@@ -225,9 +215,9 @@ app.post("/api/chat", async (req, res) => {
     }
 
     /*
-      --------------------------------------------------------
-      Call Microsoft Foundry Agent
-      --------------------------------------------------------
+    --------------------------------------------------------
+    Call Microsoft Foundry Agent
+    --------------------------------------------------------
     */
 
     const response = await openai.responses.create(
@@ -243,17 +233,17 @@ app.post("/api/chat", async (req, res) => {
     );
 
     /*
-      --------------------------------------------------------
-      Save response ID
-      --------------------------------------------------------
+    --------------------------------------------------------
+    Save response ID
+    --------------------------------------------------------
     */
 
     previousResponseId = response.id;
 
     /*
-      --------------------------------------------------------
-      Get raw AI response
-      --------------------------------------------------------
+    --------------------------------------------------------
+    Get raw AI response
+    --------------------------------------------------------
     */
 
     const rawAnswer = response.output_text;
@@ -265,9 +255,9 @@ app.post("/api/chat", async (req, res) => {
     );
 
     /*
-      --------------------------------------------------------
-      Extract chart metadata
-      --------------------------------------------------------
+    --------------------------------------------------------
+    Extract chart metadata
+    --------------------------------------------------------
     */
 
     const {
@@ -276,25 +266,14 @@ app.post("/api/chat", async (req, res) => {
       chartData,
     } = extractChartData(rawAnswer);
 
-    console.log(
-      "Chart type:",
-      chartType
-    );
-
-    console.log(
-      "Chart title:",
-      chartTitle
-    );
-
-    console.log(
-      "Extracted chart data:",
-      chartData
-    );
+    console.log("Chart type:", chartType);
+    console.log("Chart title:", chartTitle);
+    console.log("Extracted chart data:", chartData);
 
     /*
-      --------------------------------------------------------
-      Clean user-facing answer
-      --------------------------------------------------------
+    --------------------------------------------------------
+    Clean user-facing answer
+    --------------------------------------------------------
     */
 
     const answer = cleanAnswer(rawAnswer);
@@ -304,9 +283,9 @@ app.post("/api/chat", async (req, res) => {
     );
 
     /*
-      --------------------------------------------------------
-      Return response to React
-      --------------------------------------------------------
+    --------------------------------------------------------
+    Return response to React
+    --------------------------------------------------------
     */
 
     res.json({
@@ -315,12 +294,8 @@ app.post("/api/chat", async (req, res) => {
       chartTitle,
       chartData,
     });
-
   } catch (error) {
-    console.error(
-      "Foundry error:",
-      error
-    );
+    console.error("Foundry error:", error);
 
     res.status(500).json({
       error:
@@ -330,28 +305,33 @@ app.post("/api/chat", async (req, res) => {
 });
 
 /*
-  ============================================================
-  HEALTH CHECK
-  ============================================================
+============================================================
+HEALTH CHECK
+============================================================
 */
 
 app.get("/", (req, res) => {
   res.json({
-    message:
-      "NovaMart AI Backend is running",
+    message: "NovaMart AI Backend is running",
   });
 });
 
 /*
-  ============================================================
-  START SERVER
-  ============================================================
+============================================================
+START SERVER
+============================================================
 */
 
 const server = app.listen(3001, () => {
   console.log(
     "NovaMart AI Backend running on http://localhost:3001"
   );
+
+  /*
+  Run identity diagnostic once when the server starts.
+  */
+
+  logAzureIdentity();
 });
 
 server.on("error", (error) => {
