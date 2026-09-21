@@ -1,6 +1,7 @@
 import { useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+
 import {
   ResponsiveContainer,
   BarChart,
@@ -12,6 +13,7 @@ import {
   CartesianGrid,
   Tooltip,
 } from "recharts";
+
 import "./App.css";
 
 /*
@@ -30,15 +32,21 @@ function formatCompactNumber(value) {
   const absolute = Math.abs(number);
 
   if (absolute >= 1000000000) {
-    return `${(number / 1000000000).toFixed(2).replace(/\.00$/, "")}B`;
+    return `${(number / 1000000000)
+      .toFixed(2)
+      .replace(/\.00$/, "")}B`;
   }
 
   if (absolute >= 1000000) {
-    return `${(number / 1000000).toFixed(2).replace(/\.00$/, "")}M`;
+    return `${(number / 1000000)
+      .toFixed(2)
+      .replace(/\.00$/, "")}M`;
   }
 
   if (absolute >= 1000) {
-    return `${(number / 1000).toFixed(1).replace(/\.0$/, "")}K`;
+    return `${(number / 1000)
+      .toFixed(1)
+      .replace(/\.0$/, "")}K`;
   }
 
   return number.toLocaleString();
@@ -62,25 +70,253 @@ function formatTooltipValue(value) {
 
 /*
 ============================================================
+MARKDOWN TABLE -> CHART DATA
+============================================================
+
+The Foundry Agent can sometimes return:
+
+| Territory | Total Sales |
+|---|---:|
+| Australia | 10,655,336 |
+
+This function converts that table into:
+
+[
+  {
+    category: "Australia",
+    value: 10655336
+  }
+]
+============================================================
+*/
+
+function parseMarkdownTable(text) {
+  if (!text) {
+    return [];
+  }
+
+  const lines = text.split("\n");
+
+  for (let i = 0; i < lines.length - 2; i++) {
+    const headerLine = lines[i].trim();
+    const separatorLine = lines[i + 1].trim();
+
+    if (
+      !headerLine.startsWith("|") ||
+      !headerLine.endsWith("|") ||
+      !separatorLine.startsWith("|") ||
+      !separatorLine.endsWith("|") ||
+      !separatorLine.includes("---")
+    ) {
+      continue;
+    }
+
+    const rows = [];
+
+    for (let j = i + 2; j < lines.length; j++) {
+      const rowLine = lines[j].trim();
+
+      if (
+        !rowLine.startsWith("|") ||
+        !rowLine.endsWith("|")
+      ) {
+        break;
+      }
+
+      const cells = rowLine
+        .split("|")
+        .map((cell) => cell.trim())
+        .filter(Boolean);
+
+      if (cells.length < 2) {
+        continue;
+      }
+
+      const category = cells[0];
+
+      const valueText = cells[cells.length - 1]
+        .replace(/,/g, "")
+        .replace(/[₹$£€%]/g, "")
+        .trim();
+
+      const value = Number(valueText);
+
+      if (
+        category &&
+        Number.isFinite(value)
+      ) {
+        rows.push({
+          category,
+          value,
+        });
+      }
+    }
+
+    if (rows.length > 0) {
+      return rows;
+    }
+  }
+
+  return [];
+}
+
+/*
+============================================================
+DETERMINE CHART TYPE
+============================================================
+*/
+
+function determineChartType(
+  question,
+  backendChartType
+) {
+  const lowerQuestion =
+    question.toLowerCase();
+
+  /*
+  Explicit backend chart type wins
+  */
+
+  if (
+    backendChartType &&
+    backendChartType !== "bar"
+  ) {
+    return backendChartType.toLowerCase();
+  }
+
+  /*
+  Time-based questions -> Line chart
+  */
+
+  if (
+    lowerQuestion.includes("fiscal year") ||
+    lowerQuestion.includes("by year") ||
+    lowerQuestion.includes("year over") ||
+    lowerQuestion.includes("by month") ||
+    lowerQuestion.includes("by quarter") ||
+    lowerQuestion.includes("by week") ||
+    lowerQuestion.includes("over time") ||
+    lowerQuestion.includes("trend")
+  ) {
+    return "line";
+  }
+
+  /*
+  Categorical analysis -> Bar chart
+  */
+
+  return "bar";
+}
+
+/*
+============================================================
+DETERMINE CHART TITLE
+============================================================
+*/
+
+function determineChartTitle(
+  question,
+  backendChartTitle
+) {
+  const lowerQuestion =
+    question.toLowerCase();
+
+  /*
+  Use meaningful backend title if available
+  */
+
+  if (
+    backendChartTitle &&
+    backendChartTitle !== "Sales Analysis"
+  ) {
+    return backendChartTitle;
+  }
+
+  if (
+    lowerQuestion.includes("territory")
+  ) {
+    return "Sales by Territory";
+  }
+
+  if (
+    lowerQuestion.includes("product")
+  ) {
+    return "Sales by Product";
+  }
+
+  if (
+    lowerQuestion.includes("customer")
+  ) {
+    return "Sales by Customer";
+  }
+
+  if (
+    lowerQuestion.includes("reseller")
+  ) {
+    return "Sales by Reseller";
+  }
+
+  if (
+    lowerQuestion.includes("fiscal year")
+  ) {
+    return "Total Sales by Fiscal Year";
+  }
+
+  if (
+    lowerQuestion.includes("by year")
+  ) {
+    return "Total Sales by Year";
+  }
+
+  if (
+    lowerQuestion.includes("month")
+  ) {
+    return "Sales by Month";
+  }
+
+  if (
+    lowerQuestion.includes("quarter")
+  ) {
+    return "Sales by Quarter";
+  }
+
+  if (
+    lowerQuestion.includes("week")
+  ) {
+    return "Sales by Week";
+  }
+
+  return "Sales Analysis";
+}
+
+/*
+============================================================
 MAIN APP
 ============================================================
 */
 
 function App() {
-  const [question, setQuestion] = useState("");
+  const [question, setQuestion] =
+    useState("");
 
-  const [messages, setMessages] = useState([
-    {
-      role: "assistant",
-      text:
-        "Hello! I'm NovaMart AI. Ask me anything about your sales data.",
-      chartData: [],
-      chartType: "bar",
-      chartTitle: "",
-    },
-  ]);
+  const [messages, setMessages] =
+    useState([
+      {
+        role: "assistant",
 
-  const [loading, setLoading] = useState(false);
+        text:
+          "Hello! I'm NovaMart AI. Ask me anything about your sales data.",
+
+        chartData: [],
+
+        chartType: "bar",
+
+        chartTitle: "",
+      },
+    ]);
+
+  const [loading, setLoading] =
+    useState(false);
 
   /*
   ==========================================================
@@ -89,28 +325,40 @@ function App() {
   */
 
   const askQuestion = async () => {
-    if (!question.trim() || loading) return;
+    if (
+      !question.trim() ||
+      loading
+    ) {
+      return;
+    }
 
-    const userQuestion = question.trim();
+    const userQuestion =
+      question.trim();
 
     /*
     ----------------------------------------------------------
-    Add user message immediately
+    ADD USER MESSAGE
     ----------------------------------------------------------
     */
 
     setMessages((prev) => [
       ...prev,
+
       {
         role: "user",
+
         text: userQuestion,
+
         chartData: [],
+
         chartType: "bar",
+
         chartTitle: "",
       },
     ]);
 
     setQuestion("");
+
     setLoading(true);
 
     try {
@@ -118,56 +366,162 @@ function App() {
       --------------------------------------------------------
       LOCAL BACKEND
       --------------------------------------------------------
-      React → localhost:3001 → Foundry Agent
-      --------------------------------------------------------
       */
 
-      const response = await fetch(
-        "http://localhost:3001/api/chat",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            message: userQuestion,
-          }),
-        }
-      );
+      const response =
+        await fetch(
+          "http://localhost:3001/api/chat",
+          {
+            method: "POST",
+
+            headers: {
+              "Content-Type":
+                "application/json",
+            },
+
+            body: JSON.stringify({
+              message:
+                userQuestion,
+            }),
+          }
+        );
 
       if (!response.ok) {
-        throw new Error("Backend request failed");
+        throw new Error(
+          "Backend request failed"
+        );
       }
 
-      const data = await response.json();
+      const data =
+        await response.json();
 
       /*
       --------------------------------------------------------
-      Add AI response
+      GET CHART DATA FROM BACKEND
+      --------------------------------------------------------
+      */
+
+      let chartData =
+        Array.isArray(
+          data.chartData
+        )
+          ? data.chartData
+          : [];
+
+      /*
+      --------------------------------------------------------
+      FALLBACK:
+      PARSE MARKDOWN TABLE
+      --------------------------------------------------------
+
+      This is the important fix.
+
+      If Agent returns a Markdown table instead of
+      explicit Chart data, we create chart data here.
+      --------------------------------------------------------
+      */
+
+      if (
+        chartData.length === 0
+      ) {
+        chartData =
+          parseMarkdownTable(
+            data.answer
+          );
+      }
+
+      /*
+      --------------------------------------------------------
+      DETERMINE CHART TYPE
+      --------------------------------------------------------
+      */
+
+      const chartType =
+        determineChartType(
+          userQuestion,
+          data.chartType
+        );
+
+      /*
+      --------------------------------------------------------
+      DETERMINE CHART TITLE
+      --------------------------------------------------------
+      */
+
+      const chartTitle =
+        determineChartTitle(
+          userQuestion,
+          data.chartTitle
+        );
+
+      /*
+      --------------------------------------------------------
+      LOG FOR DEBUGGING
+      --------------------------------------------------------
+      */
+
+      console.log(
+        "Backend response:",
+        data
+      );
+
+      console.log(
+        "Final chart data:",
+        chartData
+      );
+
+      console.log(
+        "Final chart type:",
+        chartType
+      );
+
+      console.log(
+        "Final chart title:",
+        chartTitle
+      );
+
+      /*
+      --------------------------------------------------------
+      ADD ASSISTANT MESSAGE
       --------------------------------------------------------
       */
 
       setMessages((prev) => [
         ...prev,
+
         {
           role: "assistant",
-          text: data.answer,
-          chartData: data.chartData || [],
-          chartType: data.chartType || "bar",
-          chartTitle: data.chartTitle || "Sales Analysis",
+
+          text:
+            data.answer ||
+            "No response received.",
+
+          chartData,
+
+          chartType,
+
+          chartTitle,
         },
       ]);
     } catch (error) {
-      console.error("Chat error:", error);
+      console.error(
+        "Chat error:",
+        error
+      );
 
       setMessages((prev) => [
         ...prev,
+
         {
           role: "assistant",
+
           text:
             "Sorry, I couldn't connect to the NovaMart AI Agent.",
+
           chartData: [],
+
           chartType: "bar",
+
           chartTitle: "",
         },
       ]);
@@ -183,8 +537,12 @@ function App() {
   */
 
   const handleKeyDown = (e) => {
-    if (e.key === "Enter" && !e.shiftKey) {
+    if (
+      e.key === "Enter" &&
+      !e.shiftKey
+    ) {
       e.preventDefault();
+
       askQuestion();
     }
   };
@@ -204,11 +562,13 @@ function App() {
     }
 
     const chartType = (
-      message.chartType || "bar"
+      message.chartType ||
+      "bar"
     ).toLowerCase();
 
     const chartTitle =
-      message.chartTitle || "Sales Analysis";
+      message.chartTitle ||
+      "Sales Analysis";
 
     /*
     ----------------------------------------------------------
@@ -216,17 +576,23 @@ function App() {
     ----------------------------------------------------------
     */
 
-    if (chartType === "line") {
+    if (
+      chartType === "line"
+    ) {
       return (
         <div className="chart-container">
-          <h3>{chartTitle}</h3>
+          <h3>
+            {chartTitle}
+          </h3>
 
           <ResponsiveContainer
             width="100%"
             height={350}
           >
             <LineChart
-              data={message.chartData}
+              data={
+                message.chartData
+              }
               margin={{
                 top: 10,
                 right: 20,
@@ -234,7 +600,9 @@ function App() {
                 bottom: 60,
               }}
             >
-              <CartesianGrid strokeDasharray="3 3" />
+              <CartesianGrid
+                strokeDasharray="3 3"
+              />
 
               <XAxis
                 dataKey="category"
@@ -245,12 +613,16 @@ function App() {
               />
 
               <YAxis
-                tickFormatter={formatCompactNumber}
+                tickFormatter={
+                  formatCompactNumber
+                }
               />
 
               <Tooltip
                 formatter={(value) =>
-                  formatTooltipValue(value)
+                  formatTooltipValue(
+                    value
+                  )
                 }
               />
 
@@ -270,20 +642,24 @@ function App() {
 
     /*
     ----------------------------------------------------------
-    DEFAULT: BAR CHART
+    DEFAULT BAR CHART
     ----------------------------------------------------------
     */
 
     return (
       <div className="chart-container">
-        <h3>{chartTitle}</h3>
+        <h3>
+          {chartTitle}
+        </h3>
 
         <ResponsiveContainer
           width="100%"
           height={350}
         >
           <BarChart
-            data={message.chartData}
+            data={
+              message.chartData
+            }
             margin={{
               top: 10,
               right: 20,
@@ -291,7 +667,9 @@ function App() {
               bottom: 60,
             }}
           >
-            <CartesianGrid strokeDasharray="3 3" />
+            <CartesianGrid
+              strokeDasharray="3 3"
+            />
 
             <XAxis
               dataKey="category"
@@ -302,12 +680,16 @@ function App() {
             />
 
             <YAxis
-              tickFormatter={formatCompactNumber}
+              tickFormatter={
+                formatCompactNumber
+              }
             />
 
             <Tooltip
               formatter={(value) =>
-                formatTooltipValue(value)
+                formatTooltipValue(
+                  value
+                )
               }
             />
 
@@ -330,11 +712,8 @@ function App() {
   return (
     <div className="app">
 
-      {/* ====================================================
-          HEADER
-          ==================================================== */}
-
       <header className="header">
+
         <div className="brand">
 
           <div className="logo">
@@ -342,7 +721,9 @@ function App() {
           </div>
 
           <div>
-            <h1>NovaMart AI</h1>
+            <h1>
+              NovaMart AI
+            </h1>
 
             <span>
               Sales Intelligence Assistant
@@ -352,20 +733,16 @@ function App() {
         </div>
 
         <div className="status">
+
           <span className="status-dot"></span>
+
           Agent Online
+
         </div>
+
       </header>
 
-      {/* ====================================================
-          MAIN
-          ==================================================== */}
-
       <main className="main">
-
-        {/* ==================================================
-            HERO
-            ================================================== */}
 
         <section className="hero">
 
@@ -381,10 +758,6 @@ function App() {
             Get answers from the NovaMart semantic model
             using natural language.
           </p>
-
-          {/* ==================================================
-              SUGGESTIONS
-              ================================================== */}
 
           <div className="suggestions">
 
@@ -432,15 +805,12 @@ function App() {
 
         </section>
 
-        {/* ==================================================
-            CHAT CARD
-            ================================================== */}
-
         <section className="chat-card">
 
           <div className="chat-header">
 
             <div>
+
               <strong>
                 NovaMart AI Agent
               </strong>
@@ -448,6 +818,7 @@ function App() {
               <span>
                 Connected to Sales Semantic Model
               </span>
+
             </div>
 
             <div className="model">
@@ -456,49 +827,47 @@ function App() {
 
           </div>
 
-          {/* ==================================================
-              MESSAGES
-              ================================================== */}
-
           <div className="messages">
 
-            {messages.map((message, index) => (
+            {messages.map(
+              (message, index) => (
 
-              <div
-                key={index}
-                className={`message-row ${message.role}`}
-              >
+                <div
+                  key={index}
+                  className={`message-row ${message.role}`}
+                >
 
-                <div className="avatar">
-                  {message.role === "assistant"
-                    ? "N"
-                    : "You"}
+                  <div className="avatar">
+
+                    {message.role ===
+                    "assistant"
+                      ? "N"
+                      : "You"}
+
+                  </div>
+
+                  <div className="message">
+
+                    <ReactMarkdown
+                      remarkPlugins={[
+                        remarkGfm,
+                      ]}
+                    >
+                      {message.text}
+                    </ReactMarkdown>
+
+                    {message.role ===
+                      "assistant" &&
+                      renderChart(
+                        message
+                      )}
+
+                  </div>
+
                 </div>
 
-                <div className="message">
-
-                  <ReactMarkdown
-                    remarkPlugins={[remarkGfm]}
-                  >
-                    {message.text}
-                  </ReactMarkdown>
-
-                  {/* ==================================================
-                      DYNAMIC CHART
-                      ================================================== */}
-
-                  {message.role === "assistant" &&
-                    renderChart(message)}
-
-                </div>
-
-              </div>
-
-            ))}
-
-            {/* ==================================================
-                LOADING
-                ================================================== */}
+              )
+            )}
 
             {loading && (
 
@@ -518,18 +887,18 @@ function App() {
 
           </div>
 
-          {/* ==================================================
-              INPUT
-              ================================================== */}
-
           <div className="input-area">
 
             <textarea
               value={question}
               onChange={(e) =>
-                setQuestion(e.target.value)
+                setQuestion(
+                  e.target.value
+                )
               }
-              onKeyDown={handleKeyDown}
+              onKeyDown={
+                handleKeyDown
+              }
               placeholder="Ask a question about your sales data..."
               rows="2"
               disabled={loading}
@@ -537,7 +906,9 @@ function App() {
 
             <button
               className="send"
-              onClick={askQuestion}
+              onClick={
+                askQuestion
+              }
               disabled={loading}
             >
               {loading
@@ -554,10 +925,6 @@ function App() {
         </section>
 
       </main>
-
-      {/* ====================================================
-          FOOTER
-          ==================================================== */}
 
       <footer>
         NovaMart AI • Sales Intelligence
