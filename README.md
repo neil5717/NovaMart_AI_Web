@@ -67,7 +67,21 @@ NovaMart AI Web deployed as a Node.js web service.
 
 ## 🏗️ Architecture
 
-[Add architecture diagram here]
+NovaMart AI Agent brings together a React frontend, Node.js backend,
+Microsoft Foundry and a Power BI / Fabric semantic model.
+
+<img width="1536" height="1024" alt="architechture" src="https://github.com/user-attachments/assets/2232f209-e7bd-4945-8e2f-6a54dc262ee9" />
+
+
+### Request Flow
+
+1. User asks a sales question through the React application.
+2. The request is handled by the Node.js backend.
+3. Microsoft Foundry's NovaMart AI Agent processes the request.
+4. Fabric IQ provides access to the connected semantic model.
+5. The agent uses the semantic model and defined business logic to answer.
+6. The response is returned to the web application.
+7. Dynamic visualizations can be presented alongside the answer.
 
 ## 🎯 Why I Built This
 
